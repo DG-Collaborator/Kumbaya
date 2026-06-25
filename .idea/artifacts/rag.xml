@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="rag">
+    <output-path>$PROJECT_DIR$/rag/build/libs</output-path>
+    <root id="archive" name="rag.jar">
+      <element id="module-output" name="BackendPlug_kmp.rag.androidMain" />
+    </root>
+  </artifact>
+</component>

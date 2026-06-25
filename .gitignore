@@ -1,0 +1,42 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+  # Android: contains TAVILY_API_KEY and OPENAI_API_KEY
+  local.properties
+
+  # iOS: Info.plist CANNOT be fully ignored (iOS won't build without it).
+  # Before committing, replace actual key value with placeholder:
+  #   <string>tvly-your-key-here</string>
+
+  # ── Gradle ───────────────────────────────────────────────────────────────────
+  *.iml
+  .kotlin
+  .gradle
+  **/build/
+  !src/**/build/
+
+  # ── IDE ──────────────────────────────────────────────────────────────────────
+  .idea
+  captures
+  .externalNativeBuild
+  .cxx
+
+  # ── macOS ────────────────────────────────────────────────────────────────────
+  .DS_Store
+  **/.DS_Store
+
+  # ── iOS / Xcode ──────────────────────────────────────────────────────────────
+  xcuserdata
+  **/xcuserdata/
+  *.xcodeproj/*
+  !*.xcodeproj/project.pbxproj
+  !*.xcodeproj/xcshareddata/
+  !*.xcodeproj/project.xcworkspace/
+  !*.xcworkspace/contents.xcworkspacedata
+  **/xcshareddata/WorkspaceSettings.xcsettings
+
+  # ── Misc ─────────────────────────────────────────────────────────────────────
+  node_modules/
+  *.env
+  .env.local
+
+  # ── Session/conversation logs ─────────────────────────────────────────────────
+  *.txt

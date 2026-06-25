@@ -1,0 +1,12 @@
+ | 10:34:44.340 | DevTools | Info  | RecompilerKt | Recompiler | Running 'Gradle'...
+ | 10:34:44.825 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | Starting a Gradle Daemon, 1 busy and 1 stopped Daemons could not be reused, use --status for details
+ | 10:34:44.826 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | Daemon JVM discovery is an incubating feature.
+ | 10:34:46.619 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | Reusing configuration cache.
+ | 10:34:47.454 | App      | Info  | ResolveDirtyKt | Compose Runtime Analyzer
+    | Resolved 'dirty' @Composable scopes within 238.5us
+    |   ~ No @Composable is dirty
+    | 
+ | 10:34:47.565 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | 
+ | 10:34:47.565 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | BUILD SUCCESSFUL in 3s
+ | 10:34:47.565 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | 23 actionable tasks: 5 executed, 18 up-to-date
+ | 10:34:47.565 | Build    | Info  | Gradle | DefaultDispatcher-worker-1 | Configuration cache entry reused.
