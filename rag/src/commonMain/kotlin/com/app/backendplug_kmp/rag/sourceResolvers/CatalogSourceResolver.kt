@@ -9,16 +9,11 @@ import io.ktor.client.request.parameter
 import kotlinx.serialization.Serializable
 
 /**
-    * Open-ended discovery: searches the Socrata open-data catalog (a platform
-    * behind hundreds of government data portals) for a free-text category and
-    * returns the top dataset as a fetchable JSON source.
-
-    * Same SourceResolver seam as RegistrySourceResolver, swapping one for the
-    * other is a one-line change at the composition root; nothing above changes.
-
-    * rowLimit caps the data URL: each ingested row becomes one Ollama embed
-    * call, so keep it modest for a responsive UI.
-*/
+ * Open-ended discovery: searches the Socrata open-data catalog for a free-text
+ * query. If the query mentions a known city or state, the search is scoped to
+ * that city's Socrata portal automatically. Otherwise the global catalog is
+ * searched and results may come from any city.
+ */
 class CatalogSourceResolver(
     private val client: HttpClient,
     private val resultLimit: Int = 25,
@@ -26,14 +21,15 @@ class CatalogSourceResolver(
 ) : SourceResolver {
 
     override suspend fun search(description: String): List<SourceCandidate> {
+        val domain = detectDomain(description)
         val response: CatalogResponse = client.get("https://api.us.socrata.com/api/catalog/v1") {
             parameter("q", description)
             parameter("only", "dataset")
             parameter("limit", resultLimit)
+            if (domain != null) parameter("domains", domain)
         }.body()
 
         return response.results.map { result ->
-            // every Socrata dataset is queryable as a JSON array at this endpoint
             val url =
                 "https://${result.metadata.domain}/resource/${result.resource.id}.json?\$limit=$rowLimit"
             SourceCandidate(
@@ -43,9 +39,26 @@ class CatalogSourceResolver(
             )
         }
     }
+
+    private fun detectDomain(query: String): String? {
+        val q = query.lowercase()
+        return when {
+            "new york" in q || "nyc" in q || "manhattan" in q ||
+            "brooklyn" in q || "bronx" in q || "queens" in q   -> "data.cityofnewyork.us"
+            "san diego" in q                                   -> "internal-sandiegocounty.data.socrata.com"
+            "los angeles" in q || "lacity" in q                -> "data.lacity.org"
+            "san francisco" in q || "sfgov" in q               -> "data.sfgov.org"
+            "chicago" in q                                     -> "data.cityofchicago.org"
+            "seattle" in q                                     -> "data.seattle.gov"
+            "austin" in q                                      -> "data.austintexas.gov"
+            "boston" in q                                      -> "data.boston.gov"
+            "denver" in q                                      -> "data.denvergov.org"
+            "philadelphia" in q || "philly" in q               -> "data.phila.gov"
+            else                                               -> null
+        }
+    }
 }
 
-// only the fields we need; the client ignores the rest
 @Serializable
 private data class CatalogResponse(val results: List<CatalogResult>)
 
