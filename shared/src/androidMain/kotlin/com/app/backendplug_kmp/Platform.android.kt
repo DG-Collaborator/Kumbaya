@@ -1,6 +1,9 @@
 package com.app.backendplug_kmp
 
 import android.os.Build
+import androidx.compose.foundation.ScrollState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 
 class AndroidPlatform : Platform {
     override val name: String = "Android ${Build.VERSION.SDK_INT}"
@@ -20,3 +23,6 @@ actual fun currentDate(): String {
         cal.get(java.util.Calendar.MINUTE)
     )
 }
+
+@Composable
+actual fun HorizontalScrollBar(state: ScrollState, modifier: Modifier) {}

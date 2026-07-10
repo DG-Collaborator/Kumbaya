@@ -11,11 +11,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        /*
-           Android key source
-        */
         setContent {
-            App(tavilyKey = BuildConfig.TAVILY_API_KEY)
+            App()
         }
     }
 }
