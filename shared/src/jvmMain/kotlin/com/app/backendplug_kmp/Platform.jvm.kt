@@ -6,17 +6,12 @@ import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
-class JVMPlatform: Platform {
-    override val name: String = "Java ${System.getProperty("java.version")}"
-}
+actual fun openAiApiKey(): String =
+    System.getenv("OPENAI_API_KEY")
+        ?: error("OPENAI_API_KEY environment variable is not set.")
 
-actual fun getPlatform(): Platform = JVMPlatform()
-
-actual fun ollamaBaseUrl(): String = "http://localhost:11434"
-
-actual fun currentDate(): String =
-    java.time.LocalDateTime.now()
-        .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d yyyy, h:mm a"))
+actual fun censusApiKey(): String? =
+    System.getenv("CENSUS_API_KEY")
 
 @Composable
 actual fun HorizontalScrollBar(state: ScrollState, modifier: Modifier) {
