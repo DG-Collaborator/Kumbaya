@@ -1,25 +1,15 @@
 package com.app.backendplug_kmp
 
-import platform.Foundation.NSDate
-import platform.Foundation.NSDateFormatter
-import platform.UIKit.UIDevice
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import platform.Foundation.NSBundle
 
-class IOSPlatform: Platform {
-    override val name: String = UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
-}
+actual fun openAiApiKey(): String =
+    NSBundle.mainBundle.objectForInfoDictionaryKey("OPENAI_API_KEY") as? String
+        ?: error("OPENAI_API_KEY not set in Info.plist")
 
-actual fun getPlatform(): Platform = IOSPlatform()
-
-actual fun ollamaBaseUrl(): String = "http://localhost:11434"
-
-actual fun currentDate(): String {
-    val formatter = NSDateFormatter()
-    formatter.dateFormat = "EEEE, MMMM d yyyy, h:mm a"
-    return formatter.stringFromDate(NSDate())
-}
+actual fun censusApiKey(): String? = null
 
 @Composable
 actual fun HorizontalScrollBar(state: ScrollState, modifier: Modifier) {}

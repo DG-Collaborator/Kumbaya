@@ -41,115 +41,150 @@ A universal backend plug built with Kotlin Multiplatform. Any data source — JS
 or open-data catalog — is queryable through the same interfaces, with a RAG pipeline and MCP server
 layered on top. Targets Android, iOS, and Desktop (JVM).
 
-For a full breakdown of the architecture, swap points, and how to extend each layer, see
-[ARCHITECTURE.md](./ARCHITECTURE.md).
+On top of that universal layer sit **personas** — self-contained feature bundles modeled on specific
+user needs, each with its own directory under `rag/personas/<name>/` (data + deterministic logic),
+`mcp/personas/<name>/` (MCP tool registration), and optionally `ui/personas/<name>/` (an in-app
+screen). Two exist today:
 
-  ---
+- **Fiber Construction Manager** — pre-construction intelligence (GIS, permitting, environmental,
+  pole attachment) for an already-decided fiber build, anywhere in the US.
+- **Fiber Entrepreneur** — market opportunity analysis for a prospective fiber build: real FCC
+  broadband data + optional Census demographics, a deterministic 0–100 Fiber Opportunity Score
+  (computed in Kotlin, never guessed by the LLM), and an AI-narrated report. Available both as an
+  MCP tool and as a dashboard screen in the app.
+
+Adding a new persona means adding a new directory and one registration call — never editing an
+existing persona's files. See "Project structure" below for exactly where each layer lives; that
+structure *is* the architecture reference for this repo.
+
+---
 
 ## What it does
 
 - **Catalog mode** — search Socrata, ArcGIS Hub, and data.gov simultaneously by topic. Tap any
-  result to load its full table.
-- **Ask the Web mode** — ask any question. The app fetches live web results via Tavily and grounds
-  the LLM answer in them.
-- **MCP server** — exposes all data and RAG capabilities as six tools consumable by any MCP client
-  (Claude Desktop, agents, etc.).
+  result to load its full table, then ask questions about it grounded in a RAG pipeline over that
+  table's rows.
+- **Fiber Entrepreneur dashboard** — enter a US county's FIPS codes and get a live Fiber Opportunity
+  Score, broadband gap analysis, optional demographics, and an AI-narrated report.
+- **MCP server** — exposes all data, RAG, and persona capabilities as eight tools consumable by any
+  MCP client (Claude Desktop, agents, etc.): four general-purpose (`fetch_json`, `query_sql`, `ask`,
+  `search_datasets`) and four persona-scoped (`find_dataset`, `discover_and_ask`,
+  `fiber_pre_construction`, `market_opportunity_report`).
 
-  ---
+---
 
 ## Prerequisites
 
-### 1. Ollama (local LLM — required for MCP server and RAG tests)
+### 1. OpenAI API key (required — embeddings and generation, every platform)
 
-  ```bash
-  brew install ollama
-  ollama pull nomic-embed-text   # embedding model
-  ollama pull llama3.2           # generation model
-  ollama serve                   # keep running while using MCP tools or RAG tests
+Every platform (Desktop, Android, iOS) and the MCP server use OpenAI for embeddings and generation.
+Get a key at https://platform.openai.com.
 
-  2. OpenAI API key (required for MCP server)
+```bash
+echo 'export OPENAI_API_KEY="sk-your-key-here"' >> ~/.zshrc && source ~/.zshrc
+```
 
-  The MCP server uses OpenAI for embeddings and generation. Get a key at
-  https://platform.openai.com and add it to your shell:
+### 2. Census API key (optional — adds demographics to the Fiber Entrepreneur report)
 
-  echo 'export OPENAI_API_KEY="sk-your-key-here"' >> ~/.zshrc && source ~/.zshrc
+Without this, `market_opportunity_report` and the Fiber Entrepreneur dashboard still work — they
+just report broadband-only figures with demographics explicitly marked "not configured," rather
+than failing. Get a free key at https://api.census.gov/data/key_signup.html (instant, just an
+email + org name). Currently wired for Desktop and the MCP server only.
 
-  3. Tavily API key (required for Ask the Web feature)
+```bash
+echo 'export CENSUS_API_KEY="your-key-here"' >> ~/.zshrc && source ~/.zshrc
+```
 
-  Get a free key at https://tavily.com (1000 searches/month free) and add it to your shell:
+### 3. Ollama (optional — local/offline LLM swap)
 
-  echo 'export TAVILY_API_KEY="tvly-your-key-here"' >> ~/.zshrc && source ~/.zshrc
+Not required to run anything by default; the app and MCP server are wired to OpenAI. Ollama remains
+a one-line constructor swap (`OllamaClient` implements the same `LlmClient` interface) for a fully
+local, free demo, and a handful of `rag` tests exercise it directly (see "Running tests" below).
 
- ---
-  Secret setup per platform
+```bash
+brew install ollama
+ollama pull nomic-embed-text   # embedding model
+ollama pull llama3.2           # generation model
+ollama serve                   # keep running while using Ollama-backed tests
+```
 
-  ┌────────────────┬────────────────────────────┬──────────────────┬──────────────────────────┐
-  │     Secret     │          Desktop           │     Android      │           iOS            │
-  ├────────────────┼────────────────────────────┼──────────────────┼──────────────────────────┤
-  │ TAVILY_API_KEY │ ~/.zshrc                   │ local.properties │ iosApp/iosApp/Info.plist │
-  ├────────────────┼────────────────────────────┼──────────────────┼──────────────────────────┤
-  │ OPENAI_API_KEY │ ~/.zshrc (MCP server only) │ not required     │ not required             │
-  └────────────────┴────────────────────────────┴──────────────────┴──────────────────────────┘
+---
 
-  Android (local.properties)
+## Secret setup per platform
 
-  Add these lines to local.properties in the project root (this file is gitignored):
+| Secret | Desktop | MCP server | Android | iOS |
+|---|---|---|---|---|
+| `OPENAI_API_KEY` | `~/.zshrc` | `~/.zshrc` | `local.properties` | `Info.plist` |
+| `CENSUS_API_KEY` | `~/.zshrc` | `~/.zshrc` | not wired yet | not wired yet |
 
-  TAVILY_API_KEY=tvly-your-key-here
-  OPENAI_API_KEY=sk-your-key-here
-  
-  Sync Gradle after editing (File → Sync Project with Gradle Files).
+**Android (`local.properties`)** — add this line to `local.properties` in the project root (gitignored):
 
-  iOS (iosApp/iosApp/Info.plist)
+```
+OPENAI_API_KEY=sk-your-key-here
+```
 
-  Replace the placeholder value for TAVILY_API_KEY in Info.plist:
+Sync Gradle after editing (File → Sync Project with Gradle Files).
 
-  <key>TAVILY_API_KEY</key>
-  <string>tvly-your-key-here</string>
+**iOS (`iosApp/iosApp/Info.plist`)** — replace the placeholder value for `OPENAI_API_KEY`:
 
-  Do not commit your actual key — restore the placeholder before pushing.
+```xml
+<key>OPENAI_API_KEY</key>
+<string>sk-your-key-here</string>
+```
 
-  ---
-  Running the apps
-  
-  ┌──────────────────────┬────────────────────────────────────────────────────────────────┐
-  │       Platform       │                            Command                             │
-  ├──────────────────────┼────────────────────────────────────────────────────────────────┤
-  │ Desktop              │ ./gradlew :desktopApp:run                                      │
-  ├──────────────────────┼────────────────────────────────────────────────────────────────┤
-  │ Desktop (hot reload) │ ./gradlew :desktopApp:hotRun --auto                            │
-  ├──────────────────────┼────────────────────────────────────────────────────────────────┤
-  │ Android              │ ./gradlew :androidApp:assembleDebug or run from Android Studio │
-  ├──────────────────────┼────────────────────────────────────────────────────────────────┤
-  │ iOS                  │ Open /iosApp in Xcode and run                                  │
-  └──────────────────────┴────────────────────────────────────────────────────────────────┘
+Do not commit your actual key — restore the placeholder before pushing.
 
-  Running the MCP server
-  
-  ./gradlew :mcpServer:installDist
+---
 
-  Then point your MCP client (e.g. Claude Desktop) at the installed launcher. The server reads
-  OPENAI_API_KEY from the environment at startup and will fail immediately with a clear message
-  if it is not set.
+## Running the apps
 
-  ---
-  Running tests
+| Platform | Command |
+|---|---|
+| Desktop | `./gradlew :desktopApp:run` |
+| Desktop (hot reload) | `./gradlew :desktopApp:hotRun --auto` |
+| Android | `./gradlew :androidApp:assembleDebug` or run from Android Studio |
+| iOS | Open `/iosApp` in Xcode and run |
 
-  ./gradlew :rag:jvmTest          # RAG pipeline tests (requires Ollama running)
-  ./gradlew :mcpServer:test       # MCP end-to-end stdio tests
-  ./gradlew :shared:jvmTest       # Shared module tests
-  ./gradlew :core:jvmTest         # Core module tests
+## Running the MCP server
 
-  Tests that do not require Ollama (InMemoryVectorIndexTest, SqlDataSourceTest) can be run
-  at any time.
+```bash
+./gradlew :mcpServer:installDist
+```
 
-  ---
-  Project structure
+Then point your MCP client (e.g. Claude Desktop) at the installed launcher. The server reads
+`OPENAI_API_KEY` from the environment at startup and fails immediately with a clear message if it's
+not set. `CENSUS_API_KEY` is read the same way but is optional.
 
-  mcpServer/   — MCP tool exposure over stdio (JVM only)
-  shared/      — Compose UI + ViewModels (Android, Desktop, iOS)
-  rag/         — LLM clients, catalog resolvers, RAG pipeline
-  core/        — Data sources, HTTP client, domain types
-  iosApp/      — iOS Xcode project entry point
-  androidApp/  — Android application entry point
-  desktopApp/  — Desktop application entry point
+## Running tests
+
+```bash
+./gradlew :rag:jvmTest          # RAG + persona tests (some require Ollama running, see below)
+./gradlew :mcpServer:test       # MCP end-to-end stdio tests
+./gradlew :shared:jvmTest       # Shared module tests
+./gradlew :core:jvmTest         # Core module tests
+```
+
+Ollama must be running for: `RagPipelineIngestTest`, `RagPipelineAnswerTest`,
+`RegistrySourceResolverTest`, `OllamaClientLiveTest`. Everything else in `rag:jvmTest`
+(`InMemoryVectorIndexTest`, `CatalogSourceResolverLiveTest`) and all of `core:jvmTest`
+(`SqlDataSourceTest`) run without it.
+
+## Project structure
+
+```
+core/        — Data sources, HTTP client, domain types
+rag/         — LLM clients, catalog resolvers, RAG pipeline
+  personas/
+    fiberConstructionManager/  — pre-construction intelligence data + logic
+    fiberEntrepreneur/         — FCC/Census data, deterministic scoring, report pipeline
+mcpServer/   — MCP tool exposure over stdio (JVM only); Main.kt is the composition root
+  personas/
+    fiberConstructionManager/  — find_dataset, discover_and_ask, fiber_pre_construction
+    fiberEntrepreneur/         — market_opportunity_report
+shared/      — Compose UI + ViewModels (Android, Desktop, iOS); App.kt is the composition root
+  ui/personas/
+    fiberEntrepreneur/         — the Fiber Entrepreneur dashboard screen
+iosApp/      — iOS Xcode project entry point
+androidApp/  — Android application entry point
+desktopApp/  — Desktop application entry point
+```

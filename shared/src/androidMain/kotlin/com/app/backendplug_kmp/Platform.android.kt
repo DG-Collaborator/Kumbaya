@@ -1,28 +1,24 @@
 package com.app.backendplug_kmp
 
-import android.os.Build
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
-class AndroidPlatform : Platform {
-    override val name: String = "Android ${Build.VERSION.SDK_INT}"
+/*
+   The androidLibrary KMP plugin doesn't support BuildConfig (variant-agnostic).
+   MainActivity, in the androidApp module, has a real BuildConfig with the key;
+   it sets this holder before App() composes.
+*/
+object AndroidSecrets {
+    var openAiApiKey: String = ""
 }
 
-actual fun getPlatform(): Platform = AndroidPlatform()
+actual fun openAiApiKey(): String =
+    AndroidSecrets.openAiApiKey.ifBlank {
+        error("OPENAI_API_KEY not set — MainActivity must set AndroidSecrets.openAiApiKey before App() runs.")
+    }
 
-actual fun ollamaBaseUrl(): String = "http://10.0.2.2:11434"
-
-actual fun currentDate(): String {
-    val cal = java.util.Calendar.getInstance()
-    return "%04d-%02d-%02d %02d:%02d".format(
-        cal.get(java.util.Calendar.YEAR),
-        cal.get(java.util.Calendar.MONTH) + 1,
-        cal.get(java.util.Calendar.DAY_OF_MONTH),
-        cal.get(java.util.Calendar.HOUR_OF_DAY),
-        cal.get(java.util.Calendar.MINUTE)
-    )
-}
+actual fun censusApiKey(): String? = null
 
 @Composable
 actual fun HorizontalScrollBar(state: ScrollState, modifier: Modifier) {}

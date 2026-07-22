@@ -23,7 +23,6 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "TAVILY_API_KEY", "\"${localProps.getProperty("TAVILY_API_KEY", "")}\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"${localProps.getProperty("OPENAI_API_KEY", "")}\"")
     }
 
@@ -60,4 +59,3 @@ dependencies {
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }
-

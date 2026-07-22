@@ -5,16 +5,15 @@ import com.app.backendplug_kmp.core.net.createHttpClient
 import com.app.backendplug_kmp.core.source.JsonTableSource
 import com.app.backendplug_kmp.core.source.SourceQuery
 import com.app.backendplug_kmp.core.source.SqlDataSource
-import com.app.backendplug_kmp.rag.clients.OpenAiClient
+import com.app.backendplug_kmp.mcp.personas.fiberConstructionManager.registerFiberConstructionManagerTools
+import com.app.backendplug_kmp.mcp.personas.fiberEntrepreneur.registerFiberEntrepreneurTools
 import com.app.backendplug_kmp.rag.RagPipeline
-import com.app.backendplug_kmp.rag.RegistrySourceResolver
-import com.app.backendplug_kmp.rag.DefaultSourceRegistry
-import com.app.backendplug_kmp.rag.clients.LlmClient
 import com.app.backendplug_kmp.rag.SourceResolver
-import com.app.backendplug_kmp.rag.sourceResolvers.CatalogSourceResolver
+import com.app.backendplug_kmp.rag.clients.LlmClient
+import com.app.backendplug_kmp.rag.clients.OpenAiClient
 import com.app.backendplug_kmp.rag.sourceResolvers.ArcGisCatalogResolver
+import com.app.backendplug_kmp.rag.sourceResolvers.CatalogSourceResolver
 import com.app.backendplug_kmp.rag.sourceResolvers.DataGovCatalogResolver
-import com.app.backendplug_kmp.rag.sourceResolvers.AccelaPermitResolver
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
@@ -35,16 +34,20 @@ import kotlinx.io.buffered
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
-    * Exposes the BackendPlug core over MCP as six tools:
-    *   fetch_json / query_sql   - pull any JSON URL or SQL table
-    *   ask                      - RAG over a JSON URL
-    *   find_dataset             - semantic registry lookup
-    *   discover_and_ask         - registry lookup + RAG in one call
-    *   search_datasets          - live catalog search
-
-    * Transport is stdio, which means the protocol owns stdout: nothing here may
-    * println to stdout; any diagnostics must go to stderr only.
-*/
+ * Composition root: builds the shared clients/resolvers once, then hands
+ * them to each persona's tool registration function. General-purpose
+ * data-access tools (fetch_json, query_sql, ask, search_datasets) live here
+ * directly since they're not persona-specific; persona-scoped tools live
+ * under mcp/personas/<persona>/.
+ *
+ * Registers eight tools total:
+ *   fetch_json / query_sql / ask / search_datasets           - general-purpose
+ *   find_dataset / discover_and_ask / fiber_pre_construction - Fiber Construction Manager
+ *   market_opportunity_report                                - Fiber Entrepreneur
+ *
+ * Transport is stdio, which means the protocol owns stdout: nothing here may
+ * println to stdout; any diagnostics must go to stderr only.
+ */
 fun main() = runBlocking {
     val server = Server(
         serverInfo = Implementation(
@@ -58,40 +61,21 @@ fun main() = runBlocking {
         )
     )
 
-    // one HTTP client shared by the JSON source, Ollama (RAG) client, and catalog resolvers
+    // one HTTP client shared by the JSON source, the LLM client, and every catalog resolver
     val httpClient = createHttpClient()
     val jsonSource = JsonTableSource(httpClient)
     val sqlSource = SqlDataSource()
 
-    /*
-              ***** LLM SWAP POINT *****
-     Ollama (local):  OllamaClient(httpClient)
-                      OllamaClient(httpClient, embedModel = "mxbai-embed-large", generateModel = "mistral")
-
-     OpenAI (cloud):  OpenAiClient(httpClient, apiKey = openAiKey)
-                      OpenAiClient(httpClient, apiKey = openAiKey, generateModel = "gpt-4o")
-  */
-    val openAiKey = System.getenv("OPENAI_API_KEY") // Local key for now
+    val openAiKey = System.getenv("OPENAI_API_KEY")
         ?: error("OPENAI_API_KEY environment variable is not set, export it before starting the server.")
-    // To switch back to ollama use = OllamaClient(httpClient)
     val llm: LlmClient = OpenAiClient(httpClient, apiKey = openAiKey)
 
-    val resolver: SourceResolver = RegistrySourceResolver(llm, DefaultSourceRegistry.entries)
-    val socrataResolver = CatalogSourceResolver(httpClient, resultLimit = 30)
-    val arcgisResolver  = ArcGisCatalogResolver(httpClient, resultLimit = 30)
-    val dataGovResolver = DataGovCatalogResolver(httpClient, resultLimit = 30)
+    val socrataResolver: SourceResolver = CatalogSourceResolver(httpClient, resultLimit = 30)
+    val arcgisResolver: SourceResolver = ArcGisCatalogResolver(httpClient, resultLimit = 30)
+    val dataGovResolver: SourceResolver = DataGovCatalogResolver(httpClient, resultLimit = 30)
 
-    /*
-       ACCELA PERMIT SWAP POINT: set ACCELA_AGENCY_ID + ACCELA_APP_SECRET env vars
-       to activate live permit data from City of San Diego DSD, County, and other
-       SD agencies. Without credentials this resolver returns emptyList and
-       fiber_pre_construction falls back to public Socrata + data.gov permit data.
-    */
-    val accelaResolver = AccelaPermitResolver(
-        client    = httpClient,
-        agencyId  = System.getenv("ACCELA_AGENCY_ID"),
-        appSecret = System.getenv("ACCELA_APP_SECRET")
-    )
+    // optional: enables Census demographic context in market_opportunity_report; degrades gracefully if unset
+    val censusApiKey = System.getenv("CENSUS_API_KEY")
 
     // tool 1: fetch any JSON URL and render it as a table
     server.addTool(
@@ -177,66 +161,7 @@ fun main() = runBlocking {
         }
     }
 
-    // tool 4: resolve a free-text description to a known dataset (name + url)
-    server.addTool(
-        name = "find_dataset",
-        description = "Find a known dataset from a natural-language description. Argument: description (string).",
-        inputSchema = ToolSchema(
-            properties = JsonObject(mapOf(
-                "description" to JsonObject(mapOf(
-                    "type" to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Natural-language description of the dataset to find")
-                ))
-            )),
-            required = listOf("description")
-        )
-    ) { request ->
-        val description = request.arguments?.get("description")?.jsonPrimitive?.content
-        if (description.isNullOrBlank()) {
-            CallToolResult(content = listOf(TextContent(text = "Provide a 'description' argument.")))
-        } else {
-            val match = resolver.resolve(description)
-            val text = if (match == null) "No matching dataset found."
-            else "${match.name}\n${match.url}"
-            CallToolResult(content = listOf(TextContent(text = text)))
-        }
-    }
-
-    // tool 5: the full experience, find a dataset, fetch it, answer about it
-    server.addTool(
-        name = "discover_and_ask",
-        description = "Find a dataset from a description, fetch it, and answer a question grounded in it. Arguments: description (string), question (string).",
-        inputSchema = ToolSchema(
-            properties = JsonObject(mapOf(
-                "description" to JsonObject(mapOf(
-                    "type" to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Natural-language description of the dataset to find")
-                )),
-                "question" to JsonObject(mapOf(
-                    "type" to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Question to answer from the discovered dataset")
-                ))
-            )),
-            required = listOf("description", "question")
-        )
-    ) { request ->
-        val description = request.arguments?.get("description")?.jsonPrimitive?.content
-        val question = request.arguments?.get("question")?.jsonPrimitive?.content
-        if (description.isNullOrBlank() || question.isNullOrBlank()) {
-            CallToolResult(content = listOf(TextContent(text = "Provide 'description' and 'question' arguments.")))
-        } else {
-            val match = resolver.resolve(description)
-            if (match == null) {
-                CallToolResult(content = listOf(TextContent(text = "No matching dataset found for: $description")))
-            } else {
-                val pipeline = RagPipeline(llm)
-                pipeline.ingest(jsonSource.fetch(SourceQuery(address = match.url)))
-                CallToolResult(content = listOf(TextContent(text = "Source: ${match.name}\n\n${pipeline.answer(question)}")))
-            }
-        }
-    }
-
-    // tool 6: Parallel search across catalogs and grouped by source
+    // tool 4: parallel search across catalogs, grouped by source
     server.addTool(
         name = "search_datasets",
         description = "Search open-data catalogs for datasets matching a topic. Returns results grouped by source. Argument: query (string).",
@@ -255,23 +180,23 @@ fun main() = runBlocking {
             CallToolResult(content = listOf(TextContent(text = "Provide a 'query' argument.")))
         } else {
             val (socrata, arcgis, datagov) = coroutineScope {
-            val s = async { runCatching { socrataResolver.search(query) }.getOrDefault(emptyList()) }
-            val a = async { runCatching { arcgisResolver.search(query) }.getOrDefault(emptyList()) }
-            val d = async { runCatching { dataGovResolver.search(query) }.getOrDefault(emptyList()) }
-            Triple(s.await(), a.await(), d.await())
+                val s = async { runCatching { socrataResolver.search(query) }.getOrDefault(emptyList()) }
+                val a = async { runCatching { arcgisResolver.search(query) }.getOrDefault(emptyList()) }
+                val d = async { runCatching { dataGovResolver.search(query) }.getOrDefault(emptyList()) }
+                Triple(s.await(), a.await(), d.await())
             }
             val sections = listOf(
-                        "Socrata"    to socrata,
-                        "ArcGIS Hub" to arcgis,
-                        "data.gov"   to datagov
-                        ).filter { (_, results) -> results.isNotEmpty() }
+                "Socrata"    to socrata,
+                "ArcGIS Hub" to arcgis,
+                "data.gov"   to datagov
+            ).filter { (_, results) -> results.isNotEmpty() }
 
             if (sections.isEmpty()) {
                 CallToolResult(content = listOf(TextContent(text = "No datasets found for: $query")))
             } else {
                 val text = sections.joinToString("\n\n---\n\n") { (source, candidates) ->
                     "[$source]\n" + candidates.joinToString("\n\n") { c ->
-                    "${c.name}\n${c.description}\n${c.url}"
+                        "${c.name}\n${c.description}\n${c.url}"
                     }
                 }
                 CallToolResult(content = listOf(TextContent(text = text)))
@@ -279,113 +204,22 @@ fun main() = runBlocking {
         }
     }
 
-    // tool 7: San Diego fiber construction pre-construction intelligence agent
-    server.addTool(
-        name = "fiber_pre_construction",
-        description = """
-              San Diego metropolitan fiber construction pre-construction intelligence agent.
-              Given a construction phase and a location in the San Diego metro area,
-              searches GIS, permitting, broadband, and environmental public data catalogs
-              and returns a grounded answer with source attribution.
-              Phases: gis_mapping | utility_infrastructure | existing_fiber | broadband_demand |
-                      route_engineering | permitting | pole_attachment | environmental |
-                      construction_planning | efit
-              Arguments: location (string), phase (string), question (string).
-          """.trimIndent(),
-        inputSchema = ToolSchema(
-            properties = JsonObject(mapOf(
-                "location" to JsonObject(mapOf(
-                    "type"        to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Neighborhood, city, or zip in San Diego metro area (e.g. 'National City','Chula Vista', '92101')")
-                )),
-                "phase" to JsonObject(mapOf(
-                    "type"        to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Construction phase: gis_mapping | utility_infrastructure | existing_fiber | broadband_demand | route_engineering | permitting | pole_attachment | environmental | construction_planning | efit")
-                    )),
-                "question" to JsonObject(mapOf(
-                    "type"        to JsonPrimitive("string"),
-                    "description" to JsonPrimitive("Specific pre-construction question to answer grounded in public data")
-                ))
-            )),
-            required = listOf("location", "phase", "question")
-        )
-    ) { request ->
-
-            val location = request.arguments?.get("location")?.jsonPrimitive?.content
-            val phase    = request.arguments?.get("phase")?.jsonPrimitive?.content
-            val question = request.arguments?.get("question")?.jsonPrimitive?.content
-
-            if (location.isNullOrBlank() || phase.isNullOrBlank() || question.isNullOrBlank()) {
-                CallToolResult(content = listOf(TextContent(text = "Provide 'location', 'phase', and 'question' arguments.")))
-            } else {
-                val searchTerms = fiberPhaseSearchTerms(phase, location)
-                System.err.println("[fiber_pre_construction] phase=$phase location=$location query='$searchTerms'")
-
-                // fan out across all data sources in parallel
-                val (socrata, arcgis, datagov, accela) = coroutineScope {
-                    val s = async { runCatching { socrataResolver.search(searchTerms) }.getOrDefault(emptyList()) }
-                    val a = async { runCatching { arcgisResolver.search(searchTerms) }.getOrDefault(emptyList()) }
-                    val d = async { runCatching { dataGovResolver.search(searchTerms) }.getOrDefault(emptyList()) }
-                    val p = async { runCatching { accelaResolver.search(searchTerms) }.getOrDefault(emptyList()) }
-                    data class Quad<A,B,C,D>(val first: A, val second: B, val third: C, val fourth: D)
-                    Quad(s.await(), a.await(), d.await(), p.await())
-                }
-
-                // also check the curated registry for exact-match entries
-                val registryHits = runCatching {
-                    resolver.search("$phase fiber construction $location San Diego")
-                }.getOrDefault(emptyList())
-
-                /*
-                   merge: Accela first (highest fidelity for permitting), then registry,
-                   then live catalog; deduplicate by URL, cap at 4 sources to stay within
-                   RAG context budget
-                */
-                val candidates = (accela + registryHits + socrata + arcgis + datagov).distinctBy { it.url }
-                                                                                     .take(4)
-
-                val accelaPending = accela.isEmpty() && phase == "permitting"
-
-                if (candidates.isEmpty()) {
-                    CallToolResult(content = listOf(TextContent(text =
-                        "No datasets found for phase '$phase' in '$location'.\n" +
-                                "Try search_datasets with a broader query, e.g. 'San Diego $phase fiber'."
-                    )))
-                } else {
-                    val pipeline = RagPipeline(llm)
-                    val ingested = mutableListOf<String>()
-                    for (candidate in candidates) {
-                        try {
-                            pipeline.ingest(jsonSource.fetch(SourceQuery(address = candidate.url)))
-                            ingested += candidate.name
-                        } catch (e: Exception) {
-                            System.err.println("[fiber_pre_construction] skipped '${candidate.name}': ${e.message}")
-                        }
-                    }
-
-                    if (ingested.isEmpty()) {
-                        CallToolResult(content = listOf(TextContent(text =
-                            "Datasets were found but could not be fetched. " +
-                                    "Verify Socrata dataset IDs at data.sandiego.gov or check network access."
-                        )))
-                    } else {
-                        val sourceList = ingested.joinToString("\n") { "  • $it" }
-                        val accelaNote = if (accelaPending)
-                            "\n\nNote: Accela permit management system (City of San Diego DSD) integration " +
-                                    "pending agency API credentials. Set ACCELA_AGENCY_ID and ACCELA_APP_SECRET " +
-                                    "to add live permit records to this query."
-                        else ""
-                        val answer = pipeline.answer("For $location — $question")
-                        CallToolResult(content = listOf(TextContent(text =
-                            "Phase: $phase | Location: $location\n" +
-                                    "Sources consulted:\n$sourceList\n\n" +
-                                    answer +
-                                    accelaNote
-                        )))
-                    }
-                }
-            }
-        }
+    // persona-scoped tools
+    registerFiberConstructionManagerTools(
+        server = server,
+        llm = llm,
+        jsonSource = jsonSource,
+        socrataResolver = socrataResolver,
+        arcgisResolver = arcgisResolver,
+        dataGovResolver = dataGovResolver
+    )
+    registerFiberEntrepreneurTools(
+        server = server,
+        jsonSource = jsonSource,
+        llm = llm,
+        httpClient = httpClient,
+        censusApiKey = censusApiKey
+    )
 
     // stdio transport: kotlinx-io Source/Sink wrapped over the process streams
     val transport = StdioServerTransport(
@@ -414,23 +248,4 @@ private fun renderTable(table: DataTable): String {
             keys.joinToString(" | ") { row.value(it) }
         })
     }
-}
-
-/**
-   * Maps each of the 10 fiber construction phases to targeted search terms for
-   * San Diego open-data catalogs. Terms are tuned to surface the right datasets
-   * from Socrata (data.sandiego.gov), ArcGIS Hub (SANDAG), and data.gov.
-*/
-private fun fiberPhaseSearchTerms(phase: String, location: String): String = when (phase) {
-    "gis_mapping"            -> "San Diego $location road centerlines parcels rights-of-way GIS zoning"
-    "utility_infrastructure" -> "San Diego $location utility poles conduit electric SDG&E underground infrastructure"
-    "existing_fiber"         -> "San Diego $location fiber broadband telecommunications conduit middle mile"
-    "broadband_demand"       -> "San Diego $location broadband households internet coverage homes units demographics"
-    "route_engineering"      -> "San Diego $location right-of-way easements corridor engineering utility crossing"
-    "permitting"             -> "San Diego $location encroachment permit street opening construction development services"
-    "pole_attachment"        -> "San Diego $location utility pole ownership SDG&E joint pole attachment make-ready"
-    "environmental"          -> "San Diego $location wetlands flood zone FEMA environmental habitat coastal sensitive"
-    "construction_planning"  -> "San Diego $location traffic construction public works staging restoration"
-    "efit"                   -> "San Diego $location fiber splice OTDR cable inventory as-built GIS asset record"
-    else                     -> "San Diego $location fiber construction $phase"
 }

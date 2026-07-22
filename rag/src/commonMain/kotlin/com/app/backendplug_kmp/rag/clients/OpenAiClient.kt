@@ -27,11 +27,15 @@ class OpenAiClient(
 ) : LlmClient {
 
     override suspend fun embed(text: String): List<Float> {
-        val response: OpenAiEmbedResponse = client.post("https://api.openai.com/v1/embeddings") {
+        val httpResponse = client.post("https://api.openai.com/v1/embeddings") {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
             contentType(ContentType.Application.Json)
             setBody(OpenAiEmbedRequest(model = embedModel, input = text))
-        }.body()
+        }
+        if (!httpResponse.status.isSuccess()) {
+            error("OpenAI embeddings request failed (${httpResponse.status.value}) — check that OPENAI_API_KEY is set and has active billing/quota.")
+        }
+        val response: OpenAiEmbedResponse = httpResponse.body()
         return response.data.firstOrNull()?.embedding.orEmpty()
     }
 

@@ -5,8 +5,8 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 
-    <key>TAVILY_API_KEY</key>
-    <string>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</string>
+    <key>OPENAI_API_KEY</key>
+    <string>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</string>
 
     <key>NSAppTransportSecurity</key>
     <dict>
