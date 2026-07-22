@@ -1,6 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.kotlinJvm)
     application
+}
+
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) {
+        load(f.inputStream())
+    }
+}
+
+tasks.named<JavaExec>("run") {
+    environment("OPENAI_API_KEY", localProps.getProperty("OPENAI_API_KEY", ""))
+    environment("CENSUS_API_KEY", localProps.getProperty("CENSUS_API_KEY", ""))
+
 }
 
 dependencies {
